@@ -1,0 +1,25 @@
+name: Test on PR
+
+on:
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Test Backend
+        run: |
+          cd backend
+          npm ci
+          npm test
+
+      - name: Lint Frontend
+        run: |
+          cd frontend
+          echo "Frontend static — no lint step needed"

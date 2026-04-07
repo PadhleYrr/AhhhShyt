@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>VISION AI — Tri-Modal Control</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+  <!-- MediaPipe CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/objectron/objectron.js" crossorigin="anonymous"></script>
+
+  <!-- face-api.js CDN -->
+  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #050508;
+      --panel: #0a0a12;
+      --border: #1a1a2e;
+      --accent: #00f5ff;
+      --accent2: #ff006e;
+      --accent3: #7b2fff;
+      --text: #e0e0ff;
+      --text-dim: #5a5a7a;
+      --success: #00ff88;
+      --warn: #ffcc00;
+      --danger: #ff3355;
+      --font-mono: 'Share Tech Mono', monospace;
+      --font-ui: 'Rajdhani', sans-serif;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-ui);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── SCANLINE OVERLAY ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,245,255,0.015) 2px, rgba(0,245,255,0.015) 4px);
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* ── TOP BAR ── */
+    #topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    #topbar .logo {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 4px;
+      color: var(--accent);
+      text-shadow: 0 0 20px var(--accent);
+    }
+    #topbar .logo span { color: var(--accent2); }
+    #status-bar {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-dim);
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    #status-bar .pill {
+      padding: 3px 8px;
+      border-radius: 2px;
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    #status-bar .pill.on { border-color: var(--success); color: var(--success); }
+    #status-bar .pill.active { border-color: var(--accent); color: var(--accent); }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: blink 1s infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+    /* ── MAIN LAYOUT ── */
+    #app {
+      display: grid;
+      grid-template-columns: 1fr 280px;
+      grid-template-rows: auto 1fr auto;
+      height: calc(100vh - 51px);
+      gap: 0;
+    }
+
+    /* ── CAMERA PANEL ── */
+    #camera-panel {
+      position: relative;
+      background: #000;
+      overflow: hidden;
+      border-right: 1px solid var(--border);
+    }
+    #videoEl {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      display: block;
+    }
+    #canvasEl {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      transform: scaleX(-1);
+    }
+    #overlay-hud {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      pointer-events: none;
+    }
+    /* Corner brackets HUD */
+    .corner { position: absolute; width: 30px; height: 30px; }
+    .corner.tl { top: 12px; left: 12px; border-top: 2px solid var(--accent); border-left: 2px solid var(--accent); }
+    .corner.tr { top: 12px; right: 12px; border-top: 2px solid var(--accent); border-right: 2px solid var(--accent); }
+    .corner.bl { bottom: 12px; left: 12px; border-bottom: 2px solid var(--accent); border-left: 2px solid var(--accent); }
+    .corner.br { bottom: 12px; right: 12px; border-bottom: 2px solid var(--accent); border-right: 2px solid var(--accent); }
+
+    #active-module-label {
+      position: absolute;
+      top: 20px; left: 50%;
+      transform: translateX(-50%);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 3px;
+      color: var(--accent);
+      text-shadow: 0 0 10px var(--accent);
+      text-transform: uppercase;
+    }
+    #gesture-indicator {
+      position: absolute;
+      bottom: 20px; left: 50%;
+      transform: translateX(-50%);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--accent3);
+      background: rgba(10,10,18,0.8);
+      padding: 4px 12px;
+      border: 1px solid var(--accent3);
+      border-radius: 2px;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    #gesture-indicator.show { opacity: 1; }
+
+    /* Flash capture */
+    #flash {
+      position: absolute;
+      inset: 0;
+      background: white;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.05s;
+    }
+    #flash.snap { opacity: 0.9; transition: opacity 0.4s; }
+
+    /* ── SIDE PANEL ── */
+    #side-panel {
+      display: flex;
+      flex-direction: column;
+      background: var(--panel);
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+    .side-section {
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .side-section h3 {
+      font-size: 10px;
+      letter-spacing: 3px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      margin-bottom: 10px;
+      font-family: var(--font-mono);
+    }
+
+    /* ── VOICE INDICATOR ── */
+    #voice-viz {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      height: 36px;
+      margin-bottom: 8px;
+    }
+    .voice-bar {
+      flex: 1;
+      background: var(--border);
+      border-radius: 1px;
+      transition: height 0.1s;
+      min-height: 3px;
+      max-height: 36px;
+    }
+    .voice-bar.active { background: var(--accent2); }
+    #voice-transcript {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-dim);
+      min-height: 32px;
+      background: rgba(0,0,0,0.3);
+      padding: 6px 8px;
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      word-break: break-all;
+    }
+    #voice-transcript.listening { border-color: var(--accent2); color: var(--text); }
+
+    /* ── MODULE BUTTONS ── */
+    .module-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .mod-btn {
+      background: rgba(0,0,0,0.4);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 10px 6px;
+      font-family: var(--font-ui);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      cursor: pointer;
+      border-radius: 2px;
+      text-align: center;
+      transition: all 0.2s;
+      text-transform: uppercase;
+    }
+    .mod-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .mod-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(0,245,255,0.08); box-shadow: 0 0 10px rgba(0,245,255,0.2); }
+    .mod-btn.active-2 { border-color: var(--accent3); color: var(--accent3); background: rgba(123,47,255,0.08); }
+    .mod-btn.active-3 { border-color: var(--accent2); color: var(--accent2); background: rgba(255,0,110,0.08); }
+    .mod-btn .icon { font-size: 18px; display: block; margin-bottom: 3px; }
+
+    /* ── ACTION BUTTONS ── */
+    .action-row {
+      display: flex;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .act-btn {
+      flex: 1;
+      padding: 10px 4px;
+      font-family: var(--font-ui);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      cursor: pointer;
+      border-radius: 2px;
+      text-transform: uppercase;
+      border: none;
+      transition: all 0.2s;
+    }
+    .act-btn.capture { background: var(--accent2); color: white; }
+    .act-btn.capture:hover { filter: brightness(1.2); }
+    .act-btn.voice-toggle { background: transparent; border: 1px solid var(--accent3); color: var(--accent3); }
+    .act-btn.voice-toggle.on { background: var(--accent3); color: white; }
+    .act-btn.stop-all { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
+    .act-btn.stop-all:hover { background: var(--danger); color: white; }
+
+    /* ── FACE ENROLL ── */
+    #enroll-section input {
+      width: 100%;
+      background: rgba(0,0,0,0.4);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 10px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      border-radius: 2px;
+      margin-bottom: 6px;
+    }
+    #enroll-section input:focus { outline: none; border-color: var(--accent); }
+    #enroll-btn {
+      width: 100%;
+      padding: 10px;
+      background: transparent;
+      border: 1px solid var(--success);
+      color: var(--success);
+      font-family: var(--font-ui);
+      font-weight: 700;
+      letter-spacing: 2px;
+      font-size: 12px;
+      cursor: pointer;
+      border-radius: 2px;
+      text-transform: uppercase;
+      transition: all 0.2s;
+    }
+    #enroll-btn:hover { background: var(--success); color: #000; }
+
+    /* ── LOG FEED ── */
+    #log-feed {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px 12px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      line-height: 1.6;
+    }
+    .log-entry {
+      padding: 3px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+      display: flex;
+      gap: 8px;
+    }
+    .log-entry .ts { color: var(--text-dim); flex-shrink: 0; }
+    .log-entry.info .msg { color: var(--text-dim); }
+    .log-entry.detect .msg { color: var(--accent); }
+    .log-entry.recog .msg { color: var(--success); }
+    .log-entry.capture .msg { color: var(--accent2); }
+    .log-entry.error .msg { color: var(--danger); }
+    .log-entry.cmd .msg { color: var(--accent3); }
+
+    /* ── GESTURE GUIDE ── */
+    #gesture-guide {
+      font-family: var(--font-mono);
+      font-size: 10px;
+    }
+    .gesture-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 3px 0;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-dim);
+    }
+    .gesture-row .g { font-size: 14px; }
+    .gesture-row .desc { color: var(--text-dim); font-size: 10px; }
+
+    /* ── SAVED GALLERY ── */
+    #gallery {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4px;
+      max-height: 150px;
+      overflow-y: auto;
+    }
+    .gallery-thumb {
+      aspect-ratio: 1;
+      border: 1px solid var(--border);
+      border-radius: 1px;
+      overflow: hidden;
+      cursor: pointer;
+      position: relative;
+    }
+    .gallery-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .gallery-thumb .del {
+      position: absolute;
+      top: 1px; right: 1px;
+      background: var(--danger);
+      color: white;
+      border: none;
+      width: 14px; height: 14px;
+      font-size: 9px;
+      cursor: pointer;
+      border-radius: 1px;
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .gallery-thumb:hover .del { opacity: 1; }
+
+    /* ── BOTTOM COMMAND BAR ── */
+    #cmd-bar {
+      grid-column: 1 / -1;
+      background: var(--panel);
+      border-top: 1px solid var(--border);
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    #cmd-input {
+      flex: 1;
+      background: rgba(0,0,0,0.5);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 14px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      border-radius: 2px;
+      outline: none;
+    }
+    #cmd-input:focus { border-color: var(--accent3); }
+    #cmd-input::placeholder { color: var(--text-dim); }
+    #cmd-submit {
+      padding: 8px 20px;
+      background: var(--accent3);
+      border: none;
+      color: white;
+      font-family: var(--font-ui);
+      font-weight: 700;
+      font-size: 13px;
+      letter-spacing: 2px;
+      cursor: pointer;
+      border-radius: 2px;
+      text-transform: uppercase;
+    }
+    #cmd-submit:hover { filter: brightness(1.3); }
+
+    /* ── DETECTION RESULTS OVERLAY ── */
+    #detections-overlay {
+      position: absolute;
+      top: 50px; left: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      pointer-events: none;
+    }
+    .det-chip {
+      background: rgba(10,10,18,0.85);
+      border: 1px solid var(--accent);
+      padding: 3px 8px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--accent);
+      border-radius: 1px;
+      white-space: nowrap;
+      animation: fadeIn 0.2s;
+    }
+    @keyframes fadeIn { from { opacity:0; transform: translateX(-5px); } to { opacity:1; transform: none; } }
+
+    /* Mobile responsive */
+    @media (max-width: 640px) {
+      #app { grid-template-columns: 1fr; grid-template-rows: 50vw auto auto auto; }
+      #camera-panel { height: 50vw; min-height: 260px; }
+      #side-panel { grid-row: 2; }
+      #cmd-bar { grid-column: 1; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div id="topbar">
+  <div class="logo">VISION<span>AI</span></div>
+  <div id="status-bar">
+    <div class="pill" id="pill-cam"><span class="dot"></span>CAM OFF</div>
+    <div class="pill" id="pill-voice">MIC OFF</div>
+    <div class="pill" id="pill-models">MODELS LOADING</div>
+    <div class="pill" id="pill-module">NO MODULE</div>
+  </div>
+</div>
+
+<div id="app">
+
+  <!-- CAMERA PANEL -->
+  <div id="camera-panel">
+    <video id="videoEl" autoplay muted playsinline></video>
+    <canvas id="canvasEl"></canvas>
+    <div id="flash"></div>
+
+    <div id="overlay-hud">
+      <div class="corner tl"></div>
+      <div class="corner tr"></div>
+      <div class="corner bl"></div>
+      <div class="corner br"></div>
+      <div id="active-module-label">— STANDBY —</div>
+      <div id="detections-overlay"></div>
+      <div id="gesture-indicator"></div>
+    </div>
+  </div>
+
+  <!-- SIDE PANEL -->
+  <div id="side-panel">
+
+    <!-- VOICE -->
+    <div class="side-section">
+      <h3>⟩ Voice Control</h3>
+      <div id="voice-viz">
+        <div class="voice-bar" id="vb1"></div><div class="voice-bar" id="vb2"></div>
+        <div class="voice-bar" id="vb3"></div><div class="voice-bar" id="vb4"></div>
+        <div class="voice-bar" id="vb5"></div><div class="voice-bar" id="vb6"></div>
+        <div class="voice-bar" id="vb7"></div><div class="voice-bar" id="vb8"></div>
+      </div>
+      <div id="voice-transcript">Say a command…</div>
+      <div class="action-row" style="margin-top:8px">
+        <button class="act-btn voice-toggle" id="voice-btn" onclick="toggleVoice()">🎤 VOICE</button>
+        <button class="act-btn capture" onclick="captureSnapshot()">📸 CAPTURE</button>
+      </div>
+    </div>
+
+    <!-- MODULES -->
+    <div class="side-section">
+      <h3>⟩ Modules</h3>
+      <div class="module-grid">
+        <button class="mod-btn" id="btn-face" onclick="toggleModule('face')"><span class="icon">👤</span>FACE</button>
+        <button class="mod-btn" id="btn-recog" onclick="toggleModule('recog')"><span class="icon">🧠</span>RECOGNIZE</button>
+        <button class="mod-btn" id="btn-emotion" onclick="toggleModule('emotion')"><span class="icon">🎭</span>EMOTION</button>
+        <button class="mod-btn" id="btn-age" onclick="toggleModule('age')"><span class="icon">🔬</span>AGE/GENDER</button>
+        <button class="mod-btn" id="btn-pose" onclick="toggleModule('pose')"><span class="icon">🦴</span>POSE</button>
+        <button class="mod-btn" id="btn-hands" onclick="toggleModule('hands')"><span class="icon">✋</span>HANDS</button>
+      </div>
+      <button class="act-btn stop-all" style="width:100%;margin-top:6px" onclick="stopAll()">⬛ STOP ALL</button>
+    </div>
+
+    <!-- ENROLL -->
+    <div class="side-section" id="enroll-section">
+      <h3>⟩ Enroll Face</h3>
+      <input type="text" id="enroll-name" placeholder="Enter name…" />
+      <button id="enroll-btn" onclick="enrollFace()">+ SAVE FACE</button>
+    </div>
+
+    <!-- GALLERY -->
+    <div class="side-section">
+      <h3>⟩ Captures</h3>
+      <div id="gallery"></div>
+      <div class="action-row" style="margin-top:6px">
+        <button class="act-btn voice-toggle" onclick="downloadAll()" style="font-size:11px">⬇ EXPORT</button>
+        <button class="act-btn stop-all" onclick="clearGallery()" style="font-size:11px">🗑 CLEAR</button>
+      </div>
+    </div>
+
+    <!-- GESTURE GUIDE -->
+    <div class="side-section">
+      <h3>⟩ Hand Signs</h3>
+      <div id="gesture-guide">
+        <div class="gesture-row"><span class="g">✌️</span><span class="desc">Face Detection</span></div>
+        <div class="gesture-row"><span class="g">👍</span><span class="desc">Recognize Face</span></div>
+        <div class="gesture-row"><span class="g">👎</span><span class="desc">Stop All</span></div>
+        <div class="gesture-row"><span class="g">✋</span><span class="desc">Pause / Resume</span></div>
+        <div class="gesture-row"><span class="g">👊</span><span class="desc">Clear All</span></div>
+        <div class="gesture-row"><span class="g">☝️</span><span class="desc">Pose Module</span></div>
+        <div class="gesture-row"><span class="g">🤙</span><span class="desc">Voice On/Off</span></div>
+        <div class="gesture-row"><span class="g">🤏</span><span class="desc">Capture Snap</span></div>
+      </div>
+    </div>
+
+    <!-- LOG -->
+    <div id="log-feed"></div>
+  </div>
+
+  <!-- COMMAND BAR -->
+  <div id="cmd-bar">
+    <input type="text" id="cmd-input" placeholder="Type command: 'start face', 'capture', 'save face as John', 'stop'…" />
+    <button id="cmd-submit" onclick="processTextCommand()">SEND</button>
+  </div>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

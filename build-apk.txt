@@ -1,0 +1,103 @@
+name: Build Unreal APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: echo "VERSION=$(python3 -c "import json; print(json.load(open('version.json'))['version'])")" >> $GITHUB_OUTPUT
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Prepare www folder
+        run: |
+          mkdir -p www
+          cp index.html www/
+          cp style.css www/
+          cp unreal.js www/
+          cp version.json www/
+          cp icon.png www/ 2>/dev/null || true
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Sync web files to Android
+        run: npx cap sync android
+
+      - name: Add microphone & internet permissions to AndroidManifest
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          # Add RECORD_AUDIO permission if not present
+          if ! grep -q "RECORD_AUDIO" "$MANIFEST"; then
+            sed -i 's|<uses-permission android:name="android.permission.INTERNET"/>|<uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.RECORD_AUDIO"/>\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>|' "$MANIFEST"
+          fi
+
+      - name: Set app icon
+        run: |
+          if [ -f "icon.png" ]; then
+            sudo apt-get install -y imagemagick
+            for size in xxxhdpi:192 xxhdpi:144 xhdpi:96 hdpi:72 mdpi:48; do
+              density="${size%%:*}"
+              px="${size##*:}"
+              mkdir -p "android/app/src/main/res/mipmap-${density}"
+              for icon in ic_launcher ic_launcher_foreground ic_launcher_round; do
+                convert icon.png -resize "${px}x${px}" "android/app/src/main/res/mipmap-${density}/${icon}.png"
+              done
+            done
+            echo "✅ Icons set"
+          fi
+
+      - name: Build Debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk Unreal.apk
+
+      - name: Delete old release if exists
+        run: gh release delete v${{ steps.version.outputs.VERSION }} --yes || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release with APK
+        run: |
+          gh release create v${{ steps.version.outputs.VERSION }} Unreal.apk \
+            --title "Unreal v${{ steps.version.outputs.VERSION }}" \
+            --notes "$(python3 -c "import json; print(json.load(open('version.json'))['changelog'])")"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Unreal-v${{ steps.version.outputs.VERSION }}
+          path: Unreal.apk

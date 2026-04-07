@@ -1,0 +1,15 @@
+{
+  "appId": "com.padhleyrr.unreal",
+  "appName": "Unreal",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "backgroundColor": "#020b14",
+      "showSpinner": false
+    }
+  }
+}

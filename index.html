@@ -315,7 +315,11 @@
     <input type="password" id="apiKeyInput" placeholder="gsk_…" />
     <label>WAKE PHRASE (optional)</label>
     <input type="text" id="wakeInput" placeholder="e.g. Hey Unreal" />
-    <label>VOICE STYLE</label>
+    <label>ELEVENLABS API KEY (for real voice)</label>
+    <input type="password" id="elevenLabsKeyInput" placeholder="API key from elevenlabs.io" />
+    <label>ELEVENLABS VOICE ID (blank = Rachel)</label>
+    <input type="text" id="elevenLabsVoiceInput" placeholder="e.g. 21m00Tcm4TlvDq8ikWAM" />
+    <label>FALLBACK BROWSER VOICE</label>
     <select id="voiceSelect"><option value="">Auto (System Default)</option></select>
     <br>
     <button class="s-btn" onclick="saveSettings()">SAVE</button>
@@ -407,15 +411,22 @@ async function initMediaPipe() {
 /* RENDER LOOP */
 let frameCount=0;
 async function renderLoop() {
-  if(!STATE.cameraReady||STATE.paused){ requestAnimationFrame(renderLoop); return; }
+  if(!STATE.cameraReady){ requestAnimationFrame(renderLoop); return; }
   frameCount++;
+  // Always clear canvas every frame — this prevents ghost drawings when modules are toggled off
   ctx.clearRect(0,0,canvasEl.width,canvasEl.height);
+  if(STATE.paused){ requestAnimationFrame(renderLoop); return; }
   if(frameCount%3===0 && STATE.modelsLoaded) {
     const m=STATE.activeModules;
     if(m.has('face')||m.has('recog')||m.has('emotion')||m.has('age')) await runFaceApi();
+    else clearChips();
   }
-  if(frameCount%2===0 && STATE.activeModules.has('hands') && mpHands) await mpHands.send({image:videoEl});
-  if(frameCount%4===0 && STATE.activeModules.has('pose')  && mpPose)  await mpPose.send({image:videoEl});
+  if(frameCount%2===0 && mpHands) {
+    if(STATE.activeModules.has('hands')) await mpHands.send({image:videoEl});
+  }
+  if(frameCount%4===0 && mpPose) {
+    if(STATE.activeModules.has('pose')) await mpPose.send({image:videoEl});
+  }
   requestAnimationFrame(renderLoop);
 }
 
@@ -772,9 +783,56 @@ function initUnrealVoices() {
   speechSynthesis.onvoiceschanged=load; load();
 }
 
-function speak(text) {
+// ElevenLabs TTS — falls back to browser voice if no key set
+let currentAudio = null;
+async function speak(text) {
   if(!unrealVoiceEnabled||!text) return;
   speechSynthesis.cancel();
+  if(currentAudio){ currentAudio.pause(); currentAudio=null; }
+
+  const elKey = localStorage.getItem('eleven_api_key');
+  const elVoice = localStorage.getItem('eleven_voice_id') || '21m00Tcm4TlvDq8ikWAM'; // Rachel
+
+  function setSpeakingState(on) {
+    unrealSpeaking = on;
+    document.getElementById('hudContainer').classList.toggle('speaking', on);
+    document.getElementById('ai-status-dot').textContent = on ? '● SPEAKING' : '● ONLINE';
+    document.getElementById('ai-status-dot').style.color = '#00ff88';
+  }
+
+  if(elKey) {
+    try {
+      setSpeakingState(true);
+      const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${elVoice}/stream`, {
+        method: 'POST',
+        headers: {
+          'xi-api-key': elKey,
+          'Content-Type': 'application/json',
+          'Accept': 'audio/mpeg'
+        },
+        body: JSON.stringify({
+          text,
+          model_id: 'eleven_turbo_v2_5',
+          voice_settings: { stability: 0.45, similarity_boost: 0.82, style: 0.35, use_speaker_boost: true }
+        })
+      });
+      if(!res.ok) throw new Error('ElevenLabs ' + res.status);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      currentAudio = new Audio(url);
+      currentAudio.onended = () => { setSpeakingState(false); URL.revokeObjectURL(url); currentAudio=null; };
+      currentAudio.onerror = () => { setSpeakingState(false); fallbackSpeak(text); };
+      currentAudio.play();
+      return;
+    } catch(e) {
+      console.warn('ElevenLabs error, falling back to browser TTS:', e);
+      setSpeakingState(false);
+    }
+  }
+  fallbackSpeak(text);
+}
+
+function fallbackSpeak(text) {
   const utter=new SpeechSynthesisUtterance(text);
   utter.voice=selectedVoice; utter.rate=1.05; utter.pitch=1.1; utter.volume=1;
   utter.onstart=()=>{ unrealSpeaking=true; document.getElementById('hudContainer').classList.add('speaking'); document.getElementById('ai-status-dot').textContent='● SPEAKING'; document.getElementById('ai-status-dot').style.color='#00ff88'; };
@@ -785,7 +843,7 @@ function speak(text) {
 function toggleUnrealVoice() {
   unrealVoiceEnabled=!unrealVoiceEnabled;
   document.getElementById('voiceToggleBtn').textContent=unrealVoiceEnabled?'🔊 VOICE ON':'🔇 VOICE OFF';
-  if(!unrealVoiceEnabled) speechSynthesis.cancel();
+  if(!unrealVoiceEnabled){ speechSynthesis.cancel(); if(currentAudio){ currentAudio.pause(); currentAudio=null; } }
 }
 
 function toggleListening() {
@@ -950,17 +1008,26 @@ function clearChat(){
 
 function loadSettings(){
   const key=localStorage.getItem('unreal_api_key'),wake=localStorage.getItem('unreal_wake');
-  if(key)  document.getElementById('apiKeyInput').value=key;
-  if(wake) document.getElementById('wakeInput').value=wake;
+  const elKey=localStorage.getItem('eleven_api_key'),elVoice=localStorage.getItem('eleven_voice_id');
+  if(key)     document.getElementById('apiKeyInput').value=key;
+  if(wake)    document.getElementById('wakeInput').value=wake;
+  if(elKey)   document.getElementById('elevenLabsKeyInput').value=elKey;
+  if(elVoice) document.getElementById('elevenLabsVoiceInput').value=elVoice;
 }
 function saveSettings(){
   const key=document.getElementById('apiKeyInput').value.trim();
   const wake=document.getElementById('wakeInput').value.trim();
   const voiceIdx=document.getElementById('voiceSelect').value;
+  const elKey=document.getElementById('elevenLabsKeyInput').value.trim();
+  const elVoice=document.getElementById('elevenLabsVoiceInput').value.trim();
   if(key)      localStorage.setItem('unreal_api_key',key);
   if(wake)     localStorage.setItem('unreal_wake',wake);
   if(voiceIdx){ localStorage.setItem('unreal_voice',voiceIdx); selectedVoice=speechSynthesis.getVoices()[voiceIdx]||null; }
-  closeSettings(); speak("Config saved. Ready.");
+  if(elKey)    localStorage.setItem('eleven_api_key',elKey);
+  if(elVoice)  localStorage.setItem('eleven_voice_id',elVoice);
+  else         localStorage.removeItem('eleven_voice_id');
+  closeSettings();
+  speak("Config saved. Ready.");
 }
 function showSettings(){ loadSettings(); document.getElementById('settings-panel').style.display='flex'; }
 function closeSettings(){ document.getElementById('settings-panel').style.display='none'; }

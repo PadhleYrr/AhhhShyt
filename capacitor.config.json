@@ -1,15 +1,8 @@
 {
-  "appId": "com.padhleyrr.unreal",
-  "appName": "Unreal",
+  "appId": "com.visionai.unreal",
+  "appName": "VisionAI",
   "webDir": "www",
   "server": {
     "androidScheme": "https"
-  },
-  "plugins": {
-    "SplashScreen": {
-      "launchShowDuration": 1500,
-      "backgroundColor": "#020b14",
-      "showSpinner": false
-    }
   }
 }

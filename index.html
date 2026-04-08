@@ -2,85 +2,968 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Unreal</title>
-  <link rel="stylesheet" href="style.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>VISION AI + UNREAL</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;600;700&family=Share+Tech+Mono&family=Orbitron:wght@400;600;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <style>
+    :root {
+      --bg:#050508;--panel:#0a0a12;--border:#1a1a2e;
+      --accent:#00f5ff;--accent2:#ff006e;--accent3:#7b2fff;
+      --text:#e0e0ff;--text-dim:#5a5a7a;
+      --success:#00ff88;--danger:#ff3355;
+      --font-mono:'Share Tech Mono',monospace;
+      --font-ui:'Rajdhani',sans-serif;
+      --font-orb:'Orbitron',monospace;
+    }
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{background:var(--bg);color:var(--text);font-family:var(--font-ui);height:100vh;overflow:hidden;}
+    body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,245,255,.012) 2px,rgba(0,245,255,.012) 4px);pointer-events:none;z-index:9999;}
+
+    /* TOP BAR */
+    #topbar{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--border);height:46px;}
+    .logo{font-family:var(--font-orb);font-size:15px;font-weight:800;letter-spacing:4px;color:var(--accent);text-shadow:0 0 16px var(--accent);}
+    .logo span{color:var(--accent2);}.logo .sep{color:var(--border);margin:0 8px;}.logo .unreal{color:var(--accent3);}
+    #status-bar{font-family:var(--font-mono);font-size:10px;color:var(--text-dim);display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+    .pill{padding:2px 7px;border-radius:2px;border:1px solid var(--border);display:flex;align-items:center;gap:4px;}
+    .pill.on{border-color:var(--success);color:var(--success);}
+    .pill.active{border-color:var(--accent);color:var(--accent);}
+    .pill.ai-on{border-color:var(--accent3);color:var(--accent3);}
+    .dot{width:5px;height:5px;border-radius:50%;background:currentColor;animation:blink 1s infinite;}
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+
+    /* 3-COLUMN LAYOUT */
+    #app{display:grid;grid-template-columns:1fr 256px 286px;grid-template-rows:1fr 44px;height:calc(100vh - 46px);}
+
+    /* CAMERA */
+    #camera-panel{position:relative;background:#000;overflow:hidden;grid-row:1;}
+    #videoEl{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);display:block;}
+    #canvasEl{position:absolute;top:0;left:0;width:100%;height:100%;transform:scaleX(-1);}
+    #overlay-hud{position:absolute;inset:0;pointer-events:none;}
+    .corner{position:absolute;width:26px;height:26px;}
+    .corner.tl{top:10px;left:10px;border-top:2px solid var(--accent);border-left:2px solid var(--accent);}
+    .corner.tr{top:10px;right:10px;border-top:2px solid var(--accent);border-right:2px solid var(--accent);}
+    .corner.bl{bottom:10px;left:10px;border-bottom:2px solid var(--accent);border-left:2px solid var(--accent);}
+    .corner.br{bottom:10px;right:10px;border-bottom:2px solid var(--accent);border-right:2px solid var(--accent);}
+    #active-module-label{position:absolute;top:14px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:10px;letter-spacing:3px;color:var(--accent);text-shadow:0 0 10px var(--accent);}
+    #gesture-indicator{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:12px;color:var(--accent3);background:rgba(10,10,18,.85);padding:3px 10px;border:1px solid var(--accent3);border-radius:2px;opacity:0;transition:opacity .3s;}
+    #gesture-indicator.show{opacity:1;}
+    #flash{position:absolute;inset:0;background:white;opacity:0;pointer-events:none;transition:opacity .05s;}
+    #detections-overlay{position:absolute;top:42px;left:8px;display:flex;flex-direction:column;gap:3px;pointer-events:none;}
+    .det-chip{background:rgba(10,10,18,.88);border:1px solid var(--accent);padding:2px 7px;font-family:var(--font-mono);font-size:10px;color:var(--accent);border-radius:1px;white-space:nowrap;animation:fadeIn .2s;}
+    @keyframes fadeIn{from{opacity:0;transform:translateX(-5px)}to{opacity:1;transform:none}}
+
+    /* VISION SIDE PANEL */
+    #side-panel{display:flex;flex-direction:column;background:var(--panel);overflow-y:auto;overflow-x:hidden;border-right:1px solid var(--border);grid-row:1;}
+    .side-section{padding:9px 10px;border-bottom:1px solid var(--border);}
+    .side-section h3{font-size:9px;letter-spacing:3px;color:var(--text-dim);text-transform:uppercase;margin-bottom:7px;font-family:var(--font-mono);}
+    #voice-viz{display:flex;align-items:center;gap:3px;height:28px;margin-bottom:5px;}
+    .voice-bar{flex:1;background:var(--border);border-radius:1px;transition:height .1s;min-height:3px;max-height:28px;}
+    .voice-bar.active{background:var(--accent2);}
+    #voice-transcript{font-family:var(--font-mono);font-size:10px;color:var(--text-dim);min-height:26px;background:rgba(0,0,0,.3);padding:4px 7px;border:1px solid var(--border);border-radius:2px;word-break:break-all;}
+    #voice-transcript.listening{border-color:var(--accent2);color:var(--text);}
+    .module-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;}
+    .mod-btn{background:rgba(0,0,0,.4);border:1px solid var(--border);color:var(--text-dim);padding:7px 4px;font-family:var(--font-ui);font-size:11px;font-weight:600;letter-spacing:1px;cursor:pointer;border-radius:2px;text-align:center;transition:all .2s;text-transform:uppercase;}
+    .mod-btn .icon{font-size:15px;display:block;margin-bottom:2px;}
+    .mod-btn:hover{border-color:var(--accent);color:var(--accent);}
+    .mod-btn.active{border-color:var(--accent);color:var(--accent);background:rgba(0,245,255,.07);box-shadow:0 0 8px rgba(0,245,255,.2);}
+    .action-row{display:flex;gap:4px;margin-top:4px;}
+    .act-btn{flex:1;padding:7px 4px;font-family:var(--font-ui);font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer;border-radius:2px;text-transform:uppercase;border:none;transition:all .2s;}
+    .act-btn.capture{background:var(--accent2);color:white;}
+    .act-btn.voice-toggle{background:transparent;border:1px solid var(--accent3);color:var(--accent3);}
+    .act-btn.voice-toggle.on{background:var(--accent3);color:white;}
+    .act-btn.stop-all{background:transparent;border:1px solid var(--danger);color:var(--danger);}
+    #enroll-section input{width:100%;background:rgba(0,0,0,.4);border:1px solid var(--border);color:var(--text);padding:6px 8px;font-family:var(--font-mono);font-size:11px;border-radius:2px;margin-bottom:4px;}
+    #enroll-section input:focus{outline:none;border-color:var(--accent);}
+    #enroll-btn{width:100%;padding:7px;background:transparent;border:1px solid var(--success);color:var(--success);font-family:var(--font-ui);font-weight:700;letter-spacing:2px;font-size:11px;cursor:pointer;border-radius:2px;text-transform:uppercase;transition:all .2s;}
+    #enroll-btn:hover{background:var(--success);color:#000;}
+    #gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;max-height:110px;overflow-y:auto;}
+    .gallery-thumb{aspect-ratio:1;border:1px solid var(--border);border-radius:1px;overflow:hidden;position:relative;cursor:pointer;}
+    .gallery-thumb img{width:100%;height:100%;object-fit:cover;}
+    .gallery-thumb .del{position:absolute;top:1px;right:1px;background:var(--danger);color:white;border:none;width:12px;height:12px;font-size:8px;cursor:pointer;border-radius:1px;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s;}
+    .gallery-thumb:hover .del{opacity:1;}
+    #gesture-guide{font-family:var(--font-mono);font-size:9px;}
+    .gesture-row{display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid var(--border);color:var(--text-dim);}
+    .gesture-row .g{font-size:12px;}
+    #log-feed{flex:1;overflow-y:auto;padding:7px 9px;font-family:var(--font-mono);font-size:9px;line-height:1.7;}
+    .log-entry{padding:1px 0;border-bottom:1px solid rgba(255,255,255,.03);display:flex;gap:6px;}
+    .log-entry .ts{color:var(--text-dim);flex-shrink:0;}
+    .log-entry.info .msg{color:var(--text-dim);}
+    .log-entry.detect .msg{color:var(--accent);}
+    .log-entry.recog .msg{color:var(--success);}
+    .log-entry.capture .msg{color:var(--accent2);}
+    .log-entry.error .msg{color:var(--danger);}
+    .log-entry.cmd .msg{color:var(--accent3);}
+    .log-entry.ai .msg{color:#b088ff;}
+
+    /* UNREAL PANEL */
+    #unreal-panel{display:flex;flex-direction:column;background:#020b14;border-left:1px solid rgba(0,212,255,.12);grid-row:1;background-image:radial-gradient(ellipse at 50% 0%,rgba(0,212,255,.06) 0%,transparent 60%);overflow:hidden;}
+    #unreal-header{display:flex;align-items:center;justify-content:space-between;padding:9px 13px 7px;border-bottom:1px solid rgba(0,212,255,.12);}
+    .unreal-title{font-family:var(--font-orb);font-size:12px;font-weight:800;letter-spacing:6px;color:#00d4ff;text-shadow:0 0 14px rgba(0,212,255,.55);}
+    #ai-status-dot{font-family:var(--font-mono);font-size:9px;letter-spacing:2px;color:var(--success);animation:blink 2s infinite;}
+    .hud-wrap{display:flex;align-items:center;justify-content:center;padding:12px 0 6px;flex-shrink:0;}
+    .hud-container{position:relative;width:150px;height:150px;display:flex;align-items:center;justify-content:center;}
+    .outer-ring{width:150px;height:150px;border-radius:50%;border:2px solid rgba(0,212,255,.22);display:flex;align-items:center;justify-content:center;position:relative;animation:rotateSlow 20s linear infinite reverse;box-shadow:0 0 18px rgba(0,212,255,.07);}
+    .outer-ring::before{content:'';position:absolute;top:-3px;left:30%;width:40%;height:4px;background:#00d4ff;border-radius:2px;box-shadow:0 0 10px #00d4ff;}
+    .middle-ring{width:114px;height:114px;border-radius:50%;border:1px solid rgba(0,212,255,.38);display:flex;align-items:center;justify-content:center;animation:rotateSlow 12s linear infinite;position:relative;}
+    .middle-ring::before,.middle-ring::after{content:'';position:absolute;width:5px;height:5px;border-radius:50%;background:#00d4ff;box-shadow:0 0 8px #00d4ff;}
+    .middle-ring::before{top:-2px;left:50%;transform:translateX(-50%);}
+    .middle-ring::after{bottom:-2px;left:50%;transform:translateX(-50%);}
+    .inner-circle{width:80px;height:80px;border-radius:50%;background:radial-gradient(circle,rgba(0,212,255,.1) 0%,rgba(0,212,255,.02) 70%,transparent 100%);border:2px solid rgba(0,212,255,.52);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .3s;box-shadow:0 0 28px rgba(0,212,255,.13),inset 0 0 28px rgba(0,212,255,.07);}
+    .inner-circle:active{transform:scale(.93);}
+    .core-pulse{position:absolute;width:100%;height:100%;border-radius:50%;border:1px solid #00d4ff;opacity:0;animation:pulse 2.5s ease-out infinite;}
+    @keyframes pulse{0%{transform:scale(1);opacity:.5}100%{transform:scale(1.5);opacity:0}}
+    .mic-icon{width:24px;height:24px;color:#00d4ff;filter:drop-shadow(0 0 6px #00d4ff);z-index:2;transition:all .3s;}
+    .arc{position:absolute;border-radius:50%;border:1px dashed rgba(0,212,255,.09);pointer-events:none;}
+    .arc1{width:166px;height:166px;animation:rotateSlow 30s linear infinite reverse;}
+    .arc2{width:182px;height:182px;animation:rotateSlow 25s linear infinite;border-color:rgba(0,212,255,.05);}
+    @keyframes rotateSlow{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+    .hud-container.listening .inner-circle{border-color:#ff4d6d;box-shadow:0 0 38px rgba(255,77,109,.32),inset 0 0 28px rgba(255,77,109,.1);}
+    .hud-container.listening .mic-icon{color:#ff4d6d;filter:drop-shadow(0 0 10px #ff4d6d);animation:micPulse .5s ease-in-out infinite alternate;}
+    .hud-container.listening .core-pulse{border-color:#ff4d6d;animation:pulse .9s ease-out infinite;}
+    .hud-container.speaking .inner-circle{border-color:var(--success);box-shadow:0 0 38px rgba(0,255,136,.22);}
+    .hud-container.speaking .mic-icon{color:var(--success);filter:drop-shadow(0 0 10px var(--success));}
+    @keyframes micPulse{from{transform:scale(1)}to{transform:scale(1.18)}}
+    .speak-btn{display:block;margin:0 auto 9px;padding:9px 26px;background:transparent;border:1px solid #00d4ff;color:#00d4ff;font-family:var(--font-orb);font-size:9px;font-weight:600;letter-spacing:3px;cursor:pointer;clip-path:polygon(7px 0%,100% 0%,calc(100% - 7px) 100%,0% 100%);transition:all .3s;text-shadow:0 0 8px #00d4ff;}
+    .speak-btn.active{border-color:#ff4d6d;color:#ff4d6d;text-shadow:0 0 8px #ff4d6d;}
+    .transcript-box,.response-box{margin:0 11px 7px;padding:7px 11px;background:rgba(0,212,255,.04);border:1px solid rgba(0,212,255,.16);border-left:3px solid #00d4ff;min-height:40px;max-height:68px;overflow-y:auto;}
+    .response-box{border-left-color:var(--success);min-height:48px;max-height:84px;}
+    .transcript-label,.response-label{font-size:7px;letter-spacing:3px;color:rgba(200,240,255,.38);display:block;margin-bottom:3px;font-family:var(--font-mono);}
+    .response-label{color:rgba(0,255,136,.48);}
+    .transcript-box p,.response-box p{font-family:var(--font-mono);font-size:11px;line-height:1.5;color:#c8f0ff;}
+    .typing::after{content:'█';animation:blink .7s infinite;}
+    .unreal-nav{display:flex;justify-content:space-around;padding:7px 11px;border-top:1px solid rgba(0,212,255,.1);background:rgba(0,212,255,.02);flex-shrink:0;}
+    .unreal-nav-btn{background:transparent;border:1px solid rgba(0,212,255,.18);color:rgba(200,240,255,.45);font-family:var(--font-orb);font-size:7px;letter-spacing:2px;padding:5px 9px;cursor:pointer;transition:all .3s;}
+    .unreal-nav-btn:hover{border-color:#00d4ff;color:#00d4ff;}
+
+    /* CMD BAR */
+    #cmd-bar{grid-column:1/-1;grid-row:2;background:var(--panel);border-top:1px solid var(--border);padding:6px 13px;display:flex;align-items:center;gap:9px;}
+    #cmd-input{flex:1;background:rgba(0,0,0,.5);border:1px solid var(--border);color:var(--text);padding:6px 11px;font-family:var(--font-mono);font-size:11px;border-radius:2px;outline:none;}
+    #cmd-input:focus{border-color:var(--accent3);}
+    #cmd-input::placeholder{color:var(--text-dim);}
+    #cmd-submit{padding:6px 16px;background:var(--accent3);border:none;color:white;font-family:var(--font-ui);font-weight:700;font-size:12px;letter-spacing:2px;cursor:pointer;border-radius:2px;text-transform:uppercase;}
+    #cmd-submit:hover{filter:brightness(1.3);}
+
+    /* SETTINGS */
+    #settings-panel{position:fixed;inset:0;background:rgba(2,11,20,.96);z-index:200;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);}
+    .settings-inner{width:90%;max-width:340px;border:1px solid rgba(0,212,255,.18);padding:22px 18px;background:rgba(0,212,255,.04);box-shadow:0 0 48px rgba(0,212,255,.1);}
+    .settings-inner h3{font-family:var(--font-orb);font-size:11px;letter-spacing:4px;color:#00d4ff;margin-bottom:18px;text-align:center;}
+    .settings-inner label{display:block;font-family:var(--font-mono);font-size:8px;letter-spacing:3px;color:rgba(200,240,255,.38);margin:11px 0 4px;}
+    .settings-inner input,.settings-inner select{width:100%;background:rgba(0,212,255,.05);border:1px solid rgba(0,212,255,.18);color:#c8f0ff;font-family:var(--font-mono);font-size:12px;padding:7px 10px;outline:none;}
+    .settings-inner input:focus,.settings-inner select:focus{border-color:#00d4ff;}
+    .settings-inner select option{background:#040f1c;}
+    .s-btn{display:inline-block;margin-top:14px;margin-right:8px;padding:7px 18px;font-family:var(--font-orb);font-size:8px;letter-spacing:2px;cursor:pointer;border:1px solid #00d4ff;color:#00d4ff;background:transparent;transition:all .3s;}
+    .s-btn.close{border-color:rgba(200,240,255,.25);color:rgba(200,240,255,.38);}
+
+    ::-webkit-scrollbar{width:3px;}
+    ::-webkit-scrollbar-track{background:transparent;}
+    ::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+
+    @media(max-width:700px){
+      #app{grid-template-columns:1fr;grid-template-rows:44vw auto auto auto;height:auto;}
+      #camera-panel{height:44vw;min-height:220px;}
+      #side-panel,#unreal-panel{max-height:380px;}
+    }
+  </style>
 </head>
 <body>
-  <div id="app">
 
-    <!-- Top Bar -->
-    <div class="topbar">
-      <span class="topbar-name">U N R E A L</span>
-      <span class="topbar-status" id="statusDot">● ONLINE</span>
+<div id="topbar">
+  <div class="logo">VISION<span>AI</span><span class="sep">|</span><span class="unreal">UNREAL</span></div>
+  <div id="status-bar">
+    <div class="pill" id="pill-cam"><span class="dot"></span>CAM OFF</div>
+    <div class="pill" id="pill-voice">MIC OFF</div>
+    <div class="pill" id="pill-models">MODELS…</div>
+    <div class="pill" id="pill-module">NO MODULE</div>
+    <div class="pill" id="pill-ai">UNREAL OFF</div>
+  </div>
+</div>
+
+<div id="app">
+
+  <!-- CAMERA PANEL -->
+  <div id="camera-panel">
+    <video id="videoEl" autoplay muted playsinline></video>
+    <canvas id="canvasEl"></canvas>
+    <div id="flash"></div>
+    <div id="overlay-hud">
+      <div class="corner tl"></div><div class="corner tr"></div>
+      <div class="corner bl"></div><div class="corner br"></div>
+      <div id="active-module-label">— STANDBY —</div>
+      <div id="detections-overlay"></div>
+      <div id="gesture-indicator"></div>
     </div>
+  </div>
 
-    <!-- HUD Ring Visualizer -->
-    <div class="hud-container">
-      <div class="outer-ring" id="outerRing">
-        <div class="middle-ring" id="middleRing">
-          <div class="inner-circle" id="innerCircle">
-            <div class="core-pulse" id="corePulse"></div>
-            <div class="mic-icon" id="micIcon">
-              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect x="9" y="2" width="6" height="11" rx="3" fill="currentColor"/>
-                <path d="M5 10a7 7 0 0 0 14 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                <line x1="12" y1="19" x2="12" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                <line x1="8" y1="22" x2="16" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-              </svg>
+  <!-- VISION SIDE PANEL -->
+  <div id="side-panel">
+    <div class="side-section">
+      <h3>⟩ Voice Control</h3>
+      <div id="voice-viz">
+        <div class="voice-bar" id="vb1"></div><div class="voice-bar" id="vb2"></div>
+        <div class="voice-bar" id="vb3"></div><div class="voice-bar" id="vb4"></div>
+        <div class="voice-bar" id="vb5"></div><div class="voice-bar" id="vb6"></div>
+        <div class="voice-bar" id="vb7"></div><div class="voice-bar" id="vb8"></div>
+      </div>
+      <div id="voice-transcript">Say a command…</div>
+      <div class="action-row" style="margin-top:6px">
+        <button class="act-btn voice-toggle" id="voice-btn" onclick="toggleVoice()">🎤 VOICE</button>
+        <button class="act-btn capture" onclick="captureSnapshot()">📸 SNAP</button>
+      </div>
+    </div>
+    <div class="side-section">
+      <h3>⟩ Modules</h3>
+      <div class="module-grid">
+        <button class="mod-btn" id="btn-face"    onclick="toggleModule('face')">   <span class="icon">👤</span>FACE</button>
+        <button class="mod-btn" id="btn-recog"   onclick="toggleModule('recog')">  <span class="icon">🧠</span>RECOGNIZE</button>
+        <button class="mod-btn" id="btn-emotion" onclick="toggleModule('emotion')"><span class="icon">🎭</span>EMOTION</button>
+        <button class="mod-btn" id="btn-age"     onclick="toggleModule('age')">    <span class="icon">🔬</span>AGE/GENDER</button>
+        <button class="mod-btn" id="btn-pose"    onclick="toggleModule('pose')">   <span class="icon">🦴</span>POSE</button>
+        <button class="mod-btn" id="btn-hands"   onclick="toggleModule('hands')">  <span class="icon">✋</span>HANDS</button>
+      </div>
+      <button class="act-btn stop-all" style="width:100%;margin-top:4px" onclick="stopAll()">⬛ STOP ALL</button>
+    </div>
+    <div class="side-section" id="enroll-section">
+      <h3>⟩ Enroll Face</h3>
+      <input type="text" id="enroll-name" placeholder="Enter name…" />
+      <button id="enroll-btn" onclick="enrollFace()">+ SAVE FACE</button>
+    </div>
+    <div class="side-section">
+      <h3>⟩ Captures</h3>
+      <div id="gallery"></div>
+      <div class="action-row" style="margin-top:4px">
+        <button class="act-btn voice-toggle" onclick="downloadAll()" style="font-size:10px">⬇ EXPORT</button>
+        <button class="act-btn stop-all" onclick="clearGallery()" style="font-size:10px">🗑 CLEAR</button>
+      </div>
+    </div>
+    <div class="side-section">
+      <h3>⟩ Hand Signs</h3>
+      <div id="gesture-guide">
+        <div class="gesture-row"><span class="g">✌️</span><span>Face Detection</span></div>
+        <div class="gesture-row"><span class="g">👍</span><span>Recognize</span></div>
+        <div class="gesture-row"><span class="g">✋</span><span>Pause/Resume</span></div>
+        <div class="gesture-row"><span class="g">👊</span><span>Stop All</span></div>
+        <div class="gesture-row"><span class="g">☝️</span><span>Pose</span></div>
+        <div class="gesture-row"><span class="g">🤙</span><span>Voice</span></div>
+        <div class="gesture-row"><span class="g">🤏</span><span>Capture</span></div>
+      </div>
+    </div>
+    <div id="log-feed"></div>
+  </div>
+
+  <!-- UNREAL AI PANEL -->
+  <div id="unreal-panel">
+    <div id="unreal-header">
+      <div class="unreal-title">U N R E A L</div>
+      <div id="ai-status-dot">● ONLINE</div>
+    </div>
+    <div class="hud-wrap">
+      <div class="hud-container" id="hudContainer">
+        <div class="outer-ring">
+          <div class="middle-ring">
+            <div class="inner-circle" onclick="toggleListening()">
+              <div class="core-pulse"></div>
+              <div class="mic-icon">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <rect x="9" y="2" width="6" height="11" rx="3" fill="currentColor"/>
+                  <path d="M5 10a7 7 0 0 0 14 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  <line x1="12" y1="19" x2="12" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  <line x1="8" y1="22" x2="16" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+              </div>
             </div>
           </div>
         </div>
+        <div class="arc arc1"></div><div class="arc arc2"></div>
       </div>
-      <!-- Arc decorations -->
-      <div class="arc arc1"></div>
-      <div class="arc arc2"></div>
-      <div class="arc arc3"></div>
     </div>
-
-    <!-- Tap to speak button -->
     <button class="speak-btn" id="speakBtn" onclick="toggleListening()">
       <span id="btnText">TAP TO SPEAK</span>
     </button>
-
-    <!-- Transcript bubble -->
-    <div class="transcript-box" id="transcriptBox">
+    <div class="transcript-box">
       <span class="transcript-label">YOU</span>
-      <p id="transcriptText">Say something to Unreal...</p>
+      <p id="transcriptText">Say anything to Unreal…</p>
     </div>
-
-    <!-- Response area -->
-    <div class="response-box" id="responseBox">
+    <div class="response-box">
       <span class="response-label">UNREAL</span>
-      <p id="responseText">Systems online. How can I assist you?</p>
+      <p id="responseText">Systems online. Ready to assist.</p>
     </div>
-
-    <!-- Bottom nav -->
-    <div class="bottom-nav">
-      <button class="nav-btn" onclick="clearChat()">⟳ RESET</button>
-      <button class="nav-btn" id="voiceToggle" onclick="toggleVoice()">🔊 VOICE ON</button>
-      <button class="nav-btn" onclick="showSettings()">⚙ CONFIG</button>
+    <div class="unreal-nav">
+      <button class="unreal-nav-btn" onclick="clearChat()">⟳ RESET</button>
+      <button class="unreal-nav-btn" id="voiceToggleBtn" onclick="toggleUnrealVoice()">🔊 VOICE ON</button>
+      <button class="unreal-nav-btn" onclick="showSettings()">⚙ CONFIG</button>
     </div>
-
-    <!-- Settings Panel -->
-    <div class="settings-panel" id="settingsPanel" style="display:none">
-      <div class="settings-inner">
-        <h3>⚙ CONFIGURATION</h3>
-        <label>GROQ API KEY</label>
-        <input type="password" id="apiKeyInput" placeholder="gsk_..." />
-        <label>WAKE PHRASE (optional)</label>
-        <input type="text" id="wakeInput" placeholder="e.g. Hey Unreal" />
-        <label>VOICE STYLE</label>
-        <select id="voiceSelect">
-          <option value="">Auto (System Default)</option>
-        </select>
-        <button class="save-btn" onclick="saveSettings()">SAVE</button>
-        <button class="close-btn" onclick="closeSettings()">CLOSE</button>
-      </div>
-    </div>
-
   </div>
 
-  <script src="unreal.js"></script>
+  <!-- CMD BAR -->
+  <div id="cmd-bar">
+    <input type="text" id="cmd-input" placeholder="Vision command OR ask Unreal anything — type here…" />
+    <button id="cmd-submit" onclick="handleCmdInput()">SEND</button>
+  </div>
+
+</div>
+
+<!-- Settings -->
+<div id="settings-panel" style="display:none">
+  <div class="settings-inner">
+    <h3>⚙ CONFIGURATION</h3>
+    <label>GROQ API KEY</label>
+    <input type="password" id="apiKeyInput" placeholder="gsk_…" />
+    <label>WAKE PHRASE (optional)</label>
+    <input type="text" id="wakeInput" placeholder="e.g. Hey Unreal" />
+    <label>VOICE STYLE</label>
+    <select id="voiceSelect"><option value="">Auto (System Default)</option></select>
+    <br>
+    <button class="s-btn" onclick="saveSettings()">SAVE</button>
+    <button class="s-btn close" onclick="closeSettings()">CLOSE</button>
+  </div>
+</div>
+
+<script>
+/* ===================================================
+   VISION AI — STATE & CORE
+   =================================================== */
+const STATE = {
+  cameraReady:false, modelsLoaded:false,
+  activeModules:new Set(),
+  voiceActive:false, paused:false,
+  faceDescriptors:[], captures:[],
+  lastGesture:null, lastGestureTime:0,
+};
+const videoEl  = document.getElementById('videoEl');
+const canvasEl = document.getElementById('canvasEl');
+const ctx      = canvasEl.getContext('2d');
+const logFeed  = document.getElementById('log-feed');
+
+window.addEventListener('load', async () => {
+  log('Initializing…','info');
+  await startCamera();
+  await loadFaceApiModels();
+  loadSavedData();
+  initVisionVoice();
+  renderGallery();
+  document.getElementById('cmd-input').addEventListener('keydown', e => { if(e.key==='Enter') handleCmdInput(); });
+  document.getElementById('enroll-name').addEventListener('keydown', e => { if(e.key==='Enter') enrollFace(); });
+  initUnrealVoices();
+  speak("Systems online. I'm Unreal. How can I assist you today?");
+  log('Unreal AI online','ai');
+  setPill('pill-ai','UNREAL ON','ai-on');
+});
+
+/* CAMERA */
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}}, audio:false });
+    videoEl.srcObject = stream;
+    await new Promise(r => videoEl.onloadedmetadata = r);
+    canvasEl.width = videoEl.videoWidth||640; canvasEl.height = videoEl.videoHeight||480;
+    STATE.cameraReady = true;
+    setPill('pill-cam','CAM ON','on'); log('Camera started','info');
+    requestAnimationFrame(renderLoop);
+  } catch(e) { log('Camera error: '+e.message,'error'); }
+}
+
+/* FACE-API MODELS */
+const MODEL_URL='https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
+async function loadFaceApiModels() {
+  try {
+    setPill('pill-models','LOADING…','');
+    let tries=0;
+    while(typeof faceapi==='undefined' && tries<50){ await sleep(200); tries++; }
+    if(typeof faceapi==='undefined') throw new Error('face-api not loaded');
+    await Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+      faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+      faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+      faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL),
+      faceapi.nets.ageGenderNet.loadFromUri(MODEL_URL),
+    ]);
+    STATE.modelsLoaded=true;
+    setPill('pill-models','MODELS ✓','on'); log('Face-API models loaded','info');
+  } catch(e) { log('Model error: '+e.message,'error'); setPill('pill-models','MODEL ERR',''); }
+}
+
+/* MEDIAPIPE */
+let mpHands=null, mpPose=null;
+async function initMediaPipe() {
+  if(!mpHands && typeof Hands!=='undefined') {
+    mpHands = new Hands({ locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+    mpHands.setOptions({ maxNumHands:2, modelComplexity:1, minDetectionConfidence:0.7, minTrackingConfidence:0.5 });
+    mpHands.onResults(onHandResults);
+    log('MediaPipe Hands ready','info');
+  }
+  if(!mpPose && typeof Pose!=='undefined') {
+    mpPose = new Pose({ locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}` });
+    mpPose.setOptions({ modelComplexity:1, smoothLandmarks:true, minDetectionConfidence:0.5 });
+    mpPose.onResults(onPoseResults);
+    log('MediaPipe Pose ready','info');
+  }
+}
+
+/* RENDER LOOP */
+let frameCount=0;
+async function renderLoop() {
+  if(!STATE.cameraReady||STATE.paused){ requestAnimationFrame(renderLoop); return; }
+  frameCount++;
+  ctx.clearRect(0,0,canvasEl.width,canvasEl.height);
+  if(frameCount%3===0 && STATE.modelsLoaded) {
+    const m=STATE.activeModules;
+    if(m.has('face')||m.has('recog')||m.has('emotion')||m.has('age')) await runFaceApi();
+  }
+  if(frameCount%2===0 && STATE.activeModules.has('hands') && mpHands) await mpHands.send({image:videoEl});
+  if(frameCount%4===0 && STATE.activeModules.has('pose')  && mpPose)  await mpPose.send({image:videoEl});
+  requestAnimationFrame(renderLoop);
+}
+
+/* FACE-API RUNNER */
+async function runFaceApi() {
+  if(!STATE.modelsLoaded||!videoEl.readyState) return;
+  const mods=STATE.activeModules;
+  const opts=new faceapi.TinyFaceDetectorOptions({inputSize:320,scoreThreshold:0.5});
+  let task=faceapi.detectAllFaces(videoEl,opts);
+  if(mods.has('face'))    task=task.withFaceLandmarks();
+  if(mods.has('recog'))   task=task.withFaceLandmarks().withFaceDescriptors();
+  if(mods.has('emotion')) task=task.withFaceExpressions();
+  if(mods.has('age'))     task=task.withAgeAndGender();
+  const results=await task;
+  if(!results.length){ clearChips(); return; }
+  const dims={width:canvasEl.width,height:canvasEl.height};
+  const resized=faceapi.resizeResults(results,dims);
+  ctx.save(); ctx.scale(-1,1); ctx.translate(-canvasEl.width,0);
+  const chips=[];
+  resized.forEach((det,i)=>{
+    const box=det.detection.box;
+    const score=(det.detection.score*100).toFixed(0);
+    ctx.strokeStyle='#00f5ff'; ctx.lineWidth=2;
+    ctx.strokeRect(box.x,box.y,box.width,box.height);
+    if(mods.has('face')&&det.landmarks) faceapi.draw.drawFaceLandmarks(canvasEl,det,{drawLines:true,color:'rgba(0,245,255,0.4)'});
+    let label=`FACE ${i+1} (${score}%)`;
+    if(mods.has('recog')&&det.descriptor&&STATE.faceDescriptors.length){
+      const m=recognizeFace(det.descriptor); if(m) label=`✓ ${m.toUpperCase()} (${score}%)`;
+    }
+    if(mods.has('emotion')&&det.expressions){
+      const top=Object.entries(det.expressions).sort((a,b)=>b[1]-a[1])[0];
+      label+=` | ${top[0].toUpperCase()} ${(top[1]*100).toFixed(0)}%`;
+    }
+    if(mods.has('age')&&det.age!=null) label+=` | ${det.gender?.toUpperCase()} ~${Math.round(det.age)}yr`;
+    chips.push(label);
+    ctx.fillStyle='rgba(10,10,18,0.85)';
+    ctx.fillRect(box.x,box.y-18,Math.min(label.length*7,300),18);
+    ctx.fillStyle='#00f5ff'; ctx.font='10px Share Tech Mono,monospace';
+    ctx.fillText(label,box.x+4,box.y-5);
+  });
+  ctx.restore();
+  updateChips(chips);
+}
+
+function recognizeFace(descriptor) {
+  if(!STATE.faceDescriptors.length) return null;
+  let best=null, bestDist=Infinity;
+  STATE.faceDescriptors.forEach(({name,descriptor:saved})=>{
+    const dist=faceapi.euclideanDistance(descriptor,saved);
+    if(dist<bestDist){ bestDist=dist; best=name; }
+  });
+  return bestDist<0.6?best:'UNKNOWN';
+}
+
+/* HAND RESULTS */
+function onHandResults(results) {
+  if(!results.multiHandLandmarks?.length) return;
+  ctx.save(); ctx.scale(-1,1); ctx.translate(-canvasEl.width,0);
+  results.multiHandLandmarks.forEach(landmarks=>{
+    drawConnectors(ctx,landmarks,HAND_CONNECTIONS,{color:'#7b2fff',lineWidth:2});
+    drawLandmarks(ctx,landmarks,{color:'#ff006e',lineWidth:1,radius:3});
+    const g=classifyGesture(landmarks); if(g) onGestureDetected(g);
+  });
+  ctx.restore();
+}
+
+function classifyGesture(lm) {
+  const [thumb,index,middle,ring,pinky]=getFingerStates(lm);
+  if(!thumb&&index&&middle&&!ring&&!pinky) return 'PEACE';
+  if(thumb&&!index&&!middle&&!ring&&!pinky) return 'THUMBS_UP';
+  if(!thumb&&!index&&!middle&&!ring&&!pinky) return 'FIST';
+  if(thumb&&index&&middle&&ring&&pinky) return 'OPEN_PALM';
+  if(!thumb&&index&&!middle&&!ring&&!pinky) return 'POINT';
+  if(thumb&&!index&&!middle&&!ring&&pinky) return 'CALL';
+  if(isPinch(lm)) return 'PINCH';
+  return null;
+}
+function getFingerStates(lm){
+  const tips=[4,8,12,16,20],joints=[3,6,10,14,18];
+  return tips.map((tip,i)=> i===0 ? lm[tip].x<lm[joints[i]].x : lm[tip].y<lm[joints[i]].y);
+}
+function isPinch(lm){ const dx=lm[4].x-lm[8].x,dy=lm[4].y-lm[8].y; return Math.sqrt(dx*dx+dy*dy)<0.05; }
+
+const GESTURE_COOLDOWN=1500;
+function onGestureDetected(gesture) {
+  const now=Date.now();
+  if(gesture===STATE.lastGesture && now-STATE.lastGestureTime<GESTURE_COOLDOWN) return;
+  STATE.lastGesture=gesture; STATE.lastGestureTime=now;
+  const map={PEACE:()=>toggleModule('face'),THUMBS_UP:()=>toggleModule('recog'),FIST:()=>stopAll(),OPEN_PALM:()=>togglePause(),POINT:()=>toggleModule('pose'),CALL:()=>toggleVoice(),PINCH:()=>captureSnapshot()};
+  if(map[gesture]){ showGestureIndicator(gesture); log(`Gesture: ${gesture}`,'cmd'); map[gesture](); }
+}
+function showGestureIndicator(gesture) {
+  const labels={PEACE:'✌️ Face',THUMBS_UP:'👍 Recognize',FIST:'👊 Stop All',OPEN_PALM:'✋ Pause',POINT:'☝️ Pose',CALL:'🤙 Voice',PINCH:'🤏 Capture'};
+  const el=document.getElementById('gesture-indicator');
+  el.textContent=labels[gesture]||gesture; el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'),1500);
+}
+
+function onPoseResults(results) {
+  if(!results.poseLandmarks) return;
+  ctx.save(); ctx.scale(-1,1); ctx.translate(-canvasEl.width,0);
+  drawConnectors(ctx,results.poseLandmarks,POSE_CONNECTIONS,{color:'#00ff88',lineWidth:2});
+  drawLandmarks(ctx,results.poseLandmarks,{color:'#7b2fff',radius:4});
+  ctx.restore();
+}
+
+/* VISION VOICE */
+let visionRecognition=null;
+function initVisionVoice() {
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){ log('Speech API not supported','error'); return; }
+  visionRecognition=new SR();
+  visionRecognition.continuous=true; visionRecognition.interimResults=true; visionRecognition.lang='en-US';
+  visionRecognition.onresult=(e)=>{
+    const t=document.getElementById('voice-transcript');
+    let interim='',final='';
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      const txt=e.results[i][0].transcript.toLowerCase().trim();
+      if(e.results[i].isFinal) final=txt; else interim=txt;
+    }
+    t.textContent=final||interim||'…';
+    if(final){ log(`Voice: "${final}"`,'cmd'); processVisionCommand(final); }
+  };
+  visionRecognition.onerror=(e)=>{ if(e.error!=='no-speech') log('Voice error: '+e.error,'error'); };
+  visionRecognition.onend=()=>{ if(STATE.voiceActive) visionRecognition.start(); };
+  animateVoiceBars();
+}
+function toggleVoice() {
+  if(!visionRecognition){ log('Voice not supported','error'); return; }
+  STATE.voiceActive=!STATE.voiceActive;
+  const btn=document.getElementById('voice-btn'), t=document.getElementById('voice-transcript');
+  if(STATE.voiceActive){
+    visionRecognition.start(); btn.classList.add('on'); btn.textContent='🎤 LISTENING';
+    t.classList.add('listening'); t.textContent='Listening…';
+    setPill('pill-voice','MIC ON','on'); log('Voice activated','cmd');
+  } else {
+    visionRecognition.stop(); btn.classList.remove('on'); btn.textContent='🎤 VOICE';
+    t.classList.remove('listening'); t.textContent='Say a command…';
+    setPill('pill-voice','MIC OFF',''); log('Voice deactivated','cmd');
+  }
+}
+function animateVoiceBars() {
+  const bars=Array.from({length:8},(_,i)=>document.getElementById(`vb${i+1}`));
+  setInterval(()=>{ bars.forEach(b=>{ if(!b) return; const h=STATE.voiceActive?4+Math.random()*24:3; b.style.height=h+'px'; b.classList.toggle('active',STATE.voiceActive); }); },80);
+}
+
+/* VISION COMMAND PARSER */
+function processVisionCommand(cmd) {
+  cmd=cmd.toLowerCase().trim();
+  if(/start face|face detect|detect face|scan face|look at me|see my face/.test(cmd)) toggleModule('face',true);
+  else if(/recogni|who is|who's|identify me/.test(cmd)) toggleModule('recog',true);
+  else if(/emotion|mood|feeling|vibe|happy|sad/.test(cmd)) toggleModule('emotion',true);
+  else if(/age|gender|how old|guess age/.test(cmd)) toggleModule('age',true);
+  else if(/pose|body|skeleton|track body/.test(cmd)) toggleModule('pose',true);
+  else if(/hand|track hand|gesture mode/.test(cmd)) toggleModule('hands',true);
+  else if(/capture|snapshot|photo|click|save this/.test(cmd)) captureSnapshot();
+  else if(/stop all|stop everything|shut down|turn off all/.test(cmd)) stopAll();
+  else if(/^stop$|^pause$/.test(cmd)) { stopAll(); }
+  else if(/pause|freeze|hold/.test(cmd)) togglePause();
+  else if(/clear all|reset all/.test(cmd)) clearAll();
+  else if(/download|export/.test(cmd)) downloadAll();
+  else if(/all module|full scan|start all|activate all/.test(cmd)) ['face','recog','emotion','age'].forEach(m=>toggleModule(m,true));
+  else { const m=cmd.match(/save face as (.+)/); if(m){ document.getElementById('enroll-name').value=m[1].trim(); enrollFace(); } }
+  const fm=cmd.match(/forget (.+)/); if(fm) forgetFace(fm[1].trim());
+}
+
+/* CMD BAR — smart router */
+async function handleCmdInput() {
+  const inp=document.getElementById('cmd-input');
+  const val=inp.value.trim(); if(!val) return;
+  inp.value='';
+  if(isVisionKeyword(val)){ log(`CMD: ${val}`,'cmd'); processVisionCommand(val); }
+  else { log(`→ Unreal: ${val}`,'ai'); await unrealProcessInput(val); }
+}
+function isVisionKeyword(t) {
+  t=t.toLowerCase();
+  return /face|detect|recogni|emotion|mood|age|gender|pose|body|hand|capture|snapshot|photo|stop all|stop everything|pause|freeze|enroll|save face|forget|download|export|gallery|full scan|start all/.test(t);
+}
+
+/* MODULE TOGGLER */
+async function toggleModule(name, forceOn=false) {
+  if(forceOn&&STATE.activeModules.has(name)) return;
+  if(STATE.activeModules.has(name)&&!forceOn) STATE.activeModules.delete(name);
+  else { STATE.activeModules.add(name); if(name==='hands'||name==='pose') await initMediaPipe(); }
+  updateModuleUI();
+  log(`Module ${name.toUpperCase()} ${STATE.activeModules.has(name)?'ON':'OFF'}`,'detect');
+}
+function updateModuleUI() {
+  const map={face:'btn-face',recog:'btn-recog',emotion:'btn-emotion',age:'btn-age',pose:'btn-pose',hands:'btn-hands'};
+  Object.entries(map).forEach(([mod,id])=>document.getElementById(id).classList.toggle('active',STATE.activeModules.has(mod)));
+  const names=[...STATE.activeModules].map(m=>m.toUpperCase()).join('+') || 'NO MODULE';
+  setPill('pill-module',names,STATE.activeModules.size?'active':'');
+  document.getElementById('active-module-label').textContent=STATE.activeModules.size?'— '+names+' —':'— STANDBY —';
+}
+function stopAll(){ STATE.activeModules.clear(); updateModuleUI(); clearChips(); log('All modules stopped','info'); }
+function togglePause(){ STATE.paused=!STATE.paused; log(STATE.paused?'Paused':'Resumed','info'); }
+function clearAll(){ stopAll(); STATE.captures=[]; saveToIndexedDB(); renderGallery(); log('Cleared all','info'); }
+
+/* FACE ENROLLMENT */
+async function enrollFace() {
+  const name=document.getElementById('enroll-name').value.trim();
+  if(!name){ log('Enter a name first','error'); return; }
+  if(!STATE.modelsLoaded){ log('Models not loaded','error'); return; }
+  log(`Enrolling "${name}"…`,'info');
+  const opts=new faceapi.TinyFaceDetectorOptions({inputSize:320,scoreThreshold:0.5});
+  const result=await faceapi.detectSingleFace(videoEl,opts).withFaceLandmarks().withFaceDescriptor();
+  if(!result){ log('No face detected','error'); return; }
+  STATE.faceDescriptors=STATE.faceDescriptors.filter(d=>d.name!==name);
+  STATE.faceDescriptors.push({name,descriptor:result.descriptor});
+  saveToIndexedDB();
+  document.getElementById('enroll-name').value='';
+  log(`✓ Enrolled: "${name}"`,'recog');
+}
+function forgetFace(name) {
+  STATE.faceDescriptors=STATE.faceDescriptors.filter(d=>d.name.toLowerCase()!==name.toLowerCase());
+  saveToIndexedDB(); log(`Forgot: "${name}"`,'info');
+}
+
+/* SNAPSHOT */
+async function captureSnapshot() {
+  const fl=document.getElementById('flash');
+  fl.style.transition='none'; fl.style.opacity='0.9';
+  setTimeout(()=>{ fl.style.transition='opacity 0.5s'; fl.style.opacity='0'; },50);
+  const snap=document.createElement('canvas');
+  snap.width=videoEl.videoWidth; snap.height=videoEl.videoHeight;
+  const sctx=snap.getContext('2d');
+  sctx.scale(-1,1); sctx.translate(-snap.width,0); sctx.drawImage(videoEl,0,0);
+  sctx.scale(-1,1); sctx.translate(-snap.width,0); sctx.drawImage(canvasEl,0,0);
+  const dataUrl=snap.toDataURL('image/jpeg',0.9);
+  const capture={id:Date.now(),dataUrl,timestamp:new Date().toISOString(),label:[...STATE.activeModules].join(',')||'snapshot'};
+  STATE.captures.unshift(capture); saveToIndexedDB(); renderGallery();
+  log(`📸 Captured — ${capture.label}`,'capture');
+}
+
+/* GALLERY */
+function renderGallery() {
+  const g=document.getElementById('gallery'); g.innerHTML='';
+  STATE.captures.slice(0,18).forEach(cap=>{
+    const div=document.createElement('div'); div.className='gallery-thumb';
+    div.innerHTML=`<img src="${cap.dataUrl}" title="${cap.timestamp}"><button class="del" onclick="deleteCapture(${cap.id})">✕</button>`;
+    g.appendChild(div);
+  });
+}
+function deleteCapture(id){ STATE.captures=STATE.captures.filter(c=>c.id!==id); saveToIndexedDB(); renderGallery(); }
+function clearGallery(){ STATE.captures=[]; saveToIndexedDB(); renderGallery(); log('Gallery cleared','info'); }
+function downloadAll() {
+  if(!STATE.captures.length){ log('No captures','error'); return; }
+  STATE.captures.forEach((cap,i)=>{ const a=document.createElement('a'); a.href=cap.dataUrl; a.download=`visionai_${i+1}_${cap.label}.jpg`; a.click(); });
+  if(STATE.faceDescriptors.length){
+    const json=JSON.stringify(STATE.faceDescriptors.map(d=>({name:d.name,descriptor:Array.from(d.descriptor)})),null,2);
+    const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([json],{type:'application/json'})); a.download='visionai_faces.json'; a.click();
+  }
+  log(`Downloaded ${STATE.captures.length} captures`,'capture');
+}
+
+/* INDEXEDDB */
+let db;
+async function openDB() {
+  return new Promise((res,rej)=>{
+    const req=indexedDB.open('VisionAI',1);
+    req.onupgradeneeded=(e)=>{ const d=e.target.result; if(!d.objectStoreNames.contains('captures')) d.createObjectStore('captures',{keyPath:'id'}); if(!d.objectStoreNames.contains('faces')) d.createObjectStore('faces',{keyPath:'name'}); };
+    req.onsuccess=(e)=>res(e.target.result); req.onerror=rej;
+  });
+}
+async function saveToIndexedDB() {
+  try{
+    db=db||await openDB();
+    const tx=db.transaction(['captures','faces'],'readwrite');
+    const cs=tx.objectStore('captures'); await new Promise(r=>{const c=cs.clear();c.onsuccess=r;}); STATE.captures.forEach(c=>cs.put(c));
+    const fs=tx.objectStore('faces'); await new Promise(r=>{const c=fs.clear();c.onsuccess=r;}); STATE.faceDescriptors.forEach(f=>fs.put({name:f.name,descriptor:Array.from(f.descriptor)}));
+  }catch(e){}
+}
+async function loadSavedData() {
+  try{
+    db=await openDB();
+    const tx1=db.transaction('captures','readonly');
+    const caps=await new Promise(r=>{ const items=[]; tx1.objectStore('captures').openCursor().onsuccess=(e)=>{ const cur=e.target.result; if(cur){items.push(cur.value);cur.continue();}else r(items); }; });
+    STATE.captures=caps.sort((a,b)=>b.id-a.id);
+    const tx2=db.transaction('faces','readonly');
+    const faces=await new Promise(r=>{ const items=[]; tx2.objectStore('faces').openCursor().onsuccess=(e)=>{ const cur=e.target.result; if(cur){items.push(cur.value);cur.continue();}else r(items); }; });
+    STATE.faceDescriptors=faces.map(f=>({name:f.name,descriptor:new Float32Array(f.descriptor)}));
+    log(`Loaded ${caps.length} captures, ${faces.length} faces`,'info'); renderGallery();
+  }catch(e){}
+}
+
+/* HELPERS */
+function updateChips(chips){ document.getElementById('detections-overlay').innerHTML=chips.map(c=>`<div class="det-chip">${c}</div>`).join(''); }
+function clearChips(){ document.getElementById('detections-overlay').innerHTML=''; }
+function log(msg,type='info'){
+  const ts=new Date().toTimeString().slice(0,8);
+  const entry=document.createElement('div'); entry.className=`log-entry ${type}`;
+  entry.innerHTML=`<span class="ts">${ts}</span><span class="msg">${msg}</span>`;
+  logFeed.insertBefore(entry,logFeed.firstChild);
+  while(logFeed.children.length>120) logFeed.removeChild(logFeed.lastChild);
+}
+function setPill(id,text,cls){ const el=document.getElementById(id); if(!el) return; el.className='pill'+(cls?' '+cls:''); el.innerHTML=(cls==='on'||cls==='active'||cls==='ai-on')?`<span class="dot"></span>${text}`:text; }
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+if(typeof drawConnectors==='undefined') window.drawConnectors=()=>{};
+if(typeof drawLandmarks==='undefined')  window.drawLandmarks=()=>{};
+if(typeof HAND_CONNECTIONS==='undefined') window.HAND_CONNECTIONS=[];
+if(typeof POSE_CONNECTIONS==='undefined') window.POSE_CONNECTIONS=[];
+
+
+/* ===================================================
+   UNREAL AI — with Vision Bridge
+   =================================================== */
+
+// System prompt that knows all Vision AI capabilities
+const UNREAL_SYSTEM_PROMPT = `You are Unreal, a highly intelligent female AI assistant built into a Vision AI system. Think J.A.R.V.I.S. but female, sharp, slightly witty.
+
+Personality:
+- Confident, calm, efficient. Short sentences. Occasional wit.
+- Never say "As an AI" — you ARE Unreal.
+
+CRITICAL: You control the Vision AI camera system. When the user asks ANYTHING related to vision, face, body, emotions, camera, photo — respond with a vision_action JSON block plus a short spoken reply.
+
+VISION ACTIONS — no matter how the user phrases it, match their intent:
+{"vision_action":"face"}     → detect/show/scan face (e.g. "look at me", "see my face", "scan me", "show me", "detect me", "watch me", "check my face", "turn on face")
+{"vision_action":"recog"}    → recognize/identify (e.g. "who am I", "do you know me", "recognize me", "identify me", "check my identity", "remember me")
+{"vision_action":"emotion"}  → detect emotions (e.g. "how do I look", "read my mood", "what's my vibe", "am I happy/sad", "check my feelings", "what emotion", "my face expression")
+{"vision_action":"age"}      → age+gender (e.g. "how old do I look", "guess my age", "am I old", "what gender", "analyze my face", "how do I look age-wise")
+{"vision_action":"pose"}     → body tracking (e.g. "track my body", "body scan", "show skeleton", "see my pose", "watch my movement", "analyze body")
+{"vision_action":"hands"}    → hand tracking (e.g. "watch my hands", "track hands", "hand mode", "see my fingers", "gesture mode")
+{"vision_action":"capture"}  → take photo (e.g. "click", "take photo", "screenshot", "capture", "save this", "snap", "take a pic", "photograph me")
+{"vision_action":"stop"}     → stop everything (e.g. "stop", "off", "enough", "turn off", "shut down", "disable", "cancel")
+{"vision_action":"pause"}    → pause/resume (e.g. "pause", "freeze", "hold", "wait", "stop for a sec")
+{"vision_action":"all"}      → all modules (e.g. "start everything", "full scan", "all modules", "activate all", "do everything", "full mode")
+{"vision_action":"enroll","name":"NAME"} → save face (e.g. "save my face as NAME", "remember me as NAME", "my name is NAME remember my face", "enroll NAME")
+
+Always include the JSON on its own line, then your spoken reply on the next line.
+Example:
+{"vision_action":"emotion"}
+Reading your emotions now. Hold still.
+
+For phone actions use: {"action":"call","target":"NAME"} etc.
+For everything else, just reply normally. Keep it short and sharp.`;
+
+let unrealListening=false, unrealSpeaking=false;
+let unrealVoiceEnabled=true;
+let unrealRecognition=null;
+let selectedVoice=null;
+let conversationHistory=[];
+
+function initUnrealVoices() {
+  const load=()=>{
+    const voices=speechSynthesis.getVoices();
+    const sel=document.getElementById('voiceSelect');
+    sel.innerHTML='<option value="">Auto (System Default)</option>';
+    voices.forEach((v,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=`${v.name} (${v.lang})`; sel.appendChild(o); });
+    const saved=localStorage.getItem('unreal_voice');
+    if(saved){ selectedVoice=voices[saved]; return; }
+    selectedVoice=voices.find(v=>v.name.toLowerCase().includes('female')||v.name.includes('Samantha')||v.name.includes('Victoria')||v.name.includes('Zira')||v.name.includes('Google UK English Female')||(v.lang.startsWith('en')&&v.name.toLowerCase().includes('f')))||voices.find(v=>v.lang.startsWith('en'))||voices[0];
+  };
+  speechSynthesis.onvoiceschanged=load; load();
+}
+
+function speak(text) {
+  if(!unrealVoiceEnabled||!text) return;
+  speechSynthesis.cancel();
+  const utter=new SpeechSynthesisUtterance(text);
+  utter.voice=selectedVoice; utter.rate=1.05; utter.pitch=1.1; utter.volume=1;
+  utter.onstart=()=>{ unrealSpeaking=true; document.getElementById('hudContainer').classList.add('speaking'); document.getElementById('ai-status-dot').textContent='● SPEAKING'; document.getElementById('ai-status-dot').style.color='#00ff88'; };
+  utter.onend=()=>{ unrealSpeaking=false; document.getElementById('hudContainer').classList.remove('speaking'); document.getElementById('ai-status-dot').textContent='● ONLINE'; document.getElementById('ai-status-dot').style.color='#00ff88'; };
+  speechSynthesis.speak(utter);
+}
+
+function toggleUnrealVoice() {
+  unrealVoiceEnabled=!unrealVoiceEnabled;
+  document.getElementById('voiceToggleBtn').textContent=unrealVoiceEnabled?'🔊 VOICE ON':'🔇 VOICE OFF';
+  if(!unrealVoiceEnabled) speechSynthesis.cancel();
+}
+
+function toggleListening() {
+  if(unrealSpeaking){ speechSynthesis.cancel(); return; }
+  if(unrealListening){ unrealRecognition?.stop(); return; }
+  unrealRecognition=initUnrealRecognition();
+  if(unrealRecognition) unrealRecognition.start();
+}
+
+function initUnrealRecognition() {
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){ showUnrealResponse("Speech recognition not supported. Use Chrome."); return null; }
+  const r=new SR(); r.continuous=false; r.interimResults=true; r.lang='en-IN';
+  r.onstart=()=>{
+    unrealListening=true;
+    document.getElementById('hudContainer').classList.add('listening');
+    document.getElementById('speakBtn').classList.add('active');
+    document.getElementById('btnText').textContent='LISTENING...';
+    document.getElementById('ai-status-dot').textContent='● LISTENING';
+    document.getElementById('ai-status-dot').style.color='#ff4d6d';
+    document.getElementById('transcriptText').textContent='';
+  };
+  r.onresult=(e)=>{
+    let interim='',final='';
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      const t=e.results[i][0].transcript;
+      if(e.results[i].isFinal) final+=t; else interim+=t;
+    }
+    document.getElementById('transcriptText').textContent=final||interim;
+    if(final) unrealProcessInput(final.trim());
+  };
+  r.onerror=(e)=>{ resetUnrealState(); if(e.error==='no-speech') showUnrealResponse("Didn't catch that. Tap to try again."); else if(e.error==='not-allowed') showUnrealResponse("Microphone permission denied."); };
+  r.onend=()=>resetUnrealState();
+  return r;
+}
+
+function resetUnrealState() {
+  unrealListening=false;
+  document.getElementById('hudContainer').classList.remove('listening');
+  document.getElementById('speakBtn').classList.remove('active');
+  document.getElementById('btnText').textContent='TAP TO SPEAK';
+  document.getElementById('ai-status-dot').textContent='● ONLINE';
+  document.getElementById('ai-status-dot').style.color='#00ff88';
+}
+
+/* GROQ API */
+async function callGroq(userMessage) {
+  const apiKey=localStorage.getItem('unreal_api_key');
+  if(!apiKey) return 'Please set your Groq API key in Config (⚙) first.';
+  conversationHistory.push({role:'user',content:userMessage});
+  if(conversationHistory.length>20) conversationHistory=conversationHistory.slice(-20);
+  try{
+    const res=await fetch('https://api.groq.com/openai/v1/chat/completions',{
+      method:'POST',
+      headers:{'Authorization':`Bearer ${apiKey}`,'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:'llama-3.3-70b-versatile',
+        messages:[{role:'system',content:UNREAL_SYSTEM_PROMPT},...conversationHistory],
+        max_tokens:300, temperature:0.7
+      })
+    });
+    if(!res.ok){ const err=await res.json(); return `API Error: ${err.error?.message||'Unknown'}`; }
+    const data=await res.json();
+    const reply=data.choices[0]?.message?.content?.trim()||"Couldn't process that.";
+    conversationHistory.push({role:'assistant',content:reply});
+    return reply;
+  }catch(e){ return "Network error. Check connection."; }
+}
+
+/* PROCESS INPUT — smart vision bridge */
+async function unrealProcessInput(text) {
+  if(!text) return;
+  showUnrealResponse("Processing...",true);
+  document.getElementById('ai-status-dot').textContent='● THINKING';
+  document.getElementById('ai-status-dot').style.color='#ffaa00';
+
+  const reply=await callGroq(text);
+
+  // Extract vision_action JSON (look for it anywhere in reply)
+  const visionMatch=reply.match(/\{"vision_action"[^}]*\}/);
+  if(visionMatch){
+    try{
+      const va=JSON.parse(visionMatch[0]);
+      // Everything except the JSON is the spoken reply
+      const spokenReply=reply.replace(visionMatch[0],'').replace(/^\s*[\r\n]/gm,'').trim();
+      executeVisionAction(va);
+      const finalReply=spokenReply||getVisionConfirm(va.vision_action);
+      showUnrealResponse(finalReply);
+      speak(finalReply);
+      log(`Unreal → vision:${va.vision_action}`,'ai');
+      return;
+    }catch(e){}
+  }
+
+  // Phone actions
+  const actionMatch=reply.match(/\{[\s\S]*?"action"[\s\S]*?\}/);
+  if(actionMatch){
+    try{
+      const action=JSON.parse(actionMatch[0]);
+      const voiceReply=reply.replace(actionMatch[0],'').trim()||`Executing ${action.action}.`;
+      showUnrealResponse(voiceReply); speak(voiceReply);
+      executePhoneAction(action); return;
+    }catch(e){}
+  }
+
+  showUnrealResponse(reply);
+  speak(reply);
+}
+
+/* EXECUTE VISION ACTION — bridge to Vision AI */
+function executeVisionAction(va) {
+  switch(va.vision_action){
+    case 'face':    toggleModule('face',true);    break;
+    case 'recog':   toggleModule('recog',true);   break;
+    case 'emotion': toggleModule('emotion',true); break;
+    case 'age':     toggleModule('age',true);     break;
+    case 'pose':    toggleModule('pose',true);    break;
+    case 'hands':   toggleModule('hands',true);   break;
+    case 'capture': captureSnapshot();            break;
+    case 'stop':    stopAll();                    break;
+    case 'pause':   togglePause();                break;
+    case 'all':     ['face','recog','emotion','age'].forEach(m=>toggleModule(m,true)); break;
+    case 'enroll':  if(va.name){ document.getElementById('enroll-name').value=va.name; enrollFace(); } break;
+    case 'none':    break;
+    default:        if(['face','recog','emotion','age','pose','hands'].includes(va.vision_action)) toggleModule(va.vision_action,true);
+  }
+}
+
+function getVisionConfirm(action){
+  const map={face:"Face detection on.",recog:"Recognition active.",emotion:"Reading your emotions.",age:"Analyzing age and gender.",pose:"Body tracking on.",hands:"Hand tracking enabled.",capture:"Snapshot taken.",stop:"All systems stopped.",pause:"Paused.",all:"Full scan activated.",enroll:"Enrolling your face.",none:"Got it."};
+  return map[action]||"Done.";
+}
+
+function executePhoneAction(action){
+  const{action:type,target,text,time,app,query}=action;
+  switch(type){
+    case 'call':    window.location.href=`tel:${encodeURIComponent(target||'')}`;break;
+    case 'message': window.location.href=`sms:${encodeURIComponent(target||'')}?body=${encodeURIComponent(text||'')}`;break;
+    case 'search':  window.open(`https://www.google.com/search?q=${encodeURIComponent(query||target||'')}`, '_blank');break;
+    case 'alarm':   window.location.href=`intent://set#Intent;action=android.intent.action.SET_ALARM;i.android.intent.extra.alarm.HOUR=${time?.split(':')[0]||7};i.android.intent.extra.alarm.MINUTES=${time?.split(':')[1]||0};end`;break;
+    case 'open_app':{
+      const intents={youtube:'vnd.youtube:',whatsapp:'whatsapp://',maps:'geo:0,0?q='};
+      const k=Object.keys(intents).find(k=>(app||'').toLowerCase().includes(k));
+      if(k) window.location.href=intents[k]; else window.open(`https://play.google.com/store/search?q=${encodeURIComponent(app)}`,'_blank');
+      break;
+    }
+  }
+}
+
+function showUnrealResponse(text,isTyping=false){
+  const el=document.getElementById('responseText');
+  el.className=isTyping?'typing':''; el.textContent=text;
+}
+
+function clearChat(){
+  conversationHistory=[];
+  document.getElementById('transcriptText').textContent='Say anything to Unreal…';
+  document.getElementById('responseText').textContent='Memory cleared. Ready.';
+  document.getElementById('responseText').className='';
+  speak("Memory cleared. Ready for new session.");
+}
+
+function loadSettings(){
+  const key=localStorage.getItem('unreal_api_key'),wake=localStorage.getItem('unreal_wake');
+  if(key)  document.getElementById('apiKeyInput').value=key;
+  if(wake) document.getElementById('wakeInput').value=wake;
+}
+function saveSettings(){
+  const key=document.getElementById('apiKeyInput').value.trim();
+  const wake=document.getElementById('wakeInput').value.trim();
+  const voiceIdx=document.getElementById('voiceSelect').value;
+  if(key)      localStorage.setItem('unreal_api_key',key);
+  if(wake)     localStorage.setItem('unreal_wake',wake);
+  if(voiceIdx){ localStorage.setItem('unreal_voice',voiceIdx); selectedVoice=speechSynthesis.getVoices()[voiceIdx]||null; }
+  closeSettings(); speak("Config saved. Ready.");
+}
+function showSettings(){ loadSettings(); document.getElementById('settings-panel').style.display='flex'; }
+function closeSettings(){ document.getElementById('settings-panel').style.display='none'; }
+</script>
 </body>
 </html>
